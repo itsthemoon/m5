@@ -27,7 +27,7 @@ function isValidBody(body) {
 }
 
 
-const start = function(onStart) {
+const start = function (onStart) {
   const server = http.createServer((req, res) => {
     /* Your server will be listening for PUT requests. */
 
@@ -96,31 +96,47 @@ const start = function(onStart) {
       /* Here, you can handle the service requests. */
 
       // Write some code...
-
-      local.routes.get(service, (error, service) => {
-        if (error) {
-          res.end(serialization.serialize(error));
-          console.error(error);
-          return;
+      // Check if the service matches a worker endpoint
+      if (service.startsWith('mr-') && service.includes('-worker-')) {
+        console.log("running worker endpoint")
+        // Route the request directly to the worker endpoint
+        const workerEndpoint = global.distribution.local[service];
+        console.log("these are the available services: ", global.distribution.local)
+        if (workerEndpoint && workerEndpoint[method]) {
+          console.log("we have an endpoint boiz")
+          workerEndpoint[method](...args, (e, v) => {
+            res.end(serialization.serialize([e, v]));
+          });
+        } else {
+          console.log("we dont have an endpoint boiz")
+          res.end(serialization.serialize(new Error('Worker endpoint or method not found')));
         }
+      } else {
+        local.routes.get(service, (error, service) => {
+          if (error) {
+            res.end(serialization.serialize(error));
+            console.error(error);
+            return;
+          }
 
-        /*
-      Here, we provide a default callback which will be passed to services.
-      It will be called by the service with the result of it's call
-      then it will serialize the result and send it back to the caller.
-        */
-        const serviceCallback = (e, v) => {
-          res.end(serialization.serialize([e, v]));
-        };
+          /*
+        Here, we provide a default callback which will be passed to services.
+        It will be called by the service with the result of it's call
+        then it will serialize the result and send it back to the caller.
+          */
+          const serviceCallback = (e, v) => {
+            res.end(serialization.serialize([e, v]));
+          };
 
-        // Write some code...
+          // Write some code...
 
 
-        console.log(`[SERVER] Args: ${JSON.stringify(args)}
+          console.log(`[SERVER] Args: ${JSON.stringify(args)}
             ServiceCallback: ${serviceCallback}`);
 
-        service[method](...args, serviceCallback);
-      });
+          service[method](...args, serviceCallback);
+        });
+      }
     });
   });
 
