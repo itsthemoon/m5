@@ -2,6 +2,9 @@
 
 const util = require('./distribution/util/util.js');
 const args = require('yargs').argv;
+// const fetch = require('node-fetch');
+// const jsdom = require('jsdom');
+// const {JSDOM} = jsdom;
 
 // Default configuration
 global.nodeConfig = global.nodeConfig || {
@@ -11,6 +14,10 @@ global.nodeConfig = global.nodeConfig || {
     console.log('Node started!');
   },
 };
+
+// Make axios and JSDOM globally accessible
+// global.fetch = fetch;
+// global.JSDOM = JSDOM;
 
 /*
     As a debugging tool, you can pass ip and port arguments directly.

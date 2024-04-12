@@ -1,8 +1,11 @@
 const http = require('http');
 const url = require('url');
+const crypto = require('crypto');
 
 let local = require('../local/local');
 const serialization = require('../util/serialization');
+const mrEndpoints = new Map();
+
 
 /*
     The start function will be called to start your node.
@@ -27,7 +30,7 @@ function isValidBody(body) {
 }
 
 
-const start = function (onStart) {
+const start = function(onStart) {
   const server = http.createServer((req, res) => {
     /* Your server will be listening for PUT requests. */
 
@@ -50,8 +53,8 @@ const start = function (onStart) {
     const pathname = url.parse(req.url).pathname;
     const [, service, method] = pathname.split('/');
 
-    console.log(`[SERVER] (${global.nodeConfig.ip}:${global.nodeConfig.port})
-        Request: ${service}:${method}`);
+    // console.log(`[SERVER] (${global.nodeConfig.ip}:${global.nodeConfig.port})
+    //     Request: ${service}:${method}`);
 
 
     /*
@@ -96,20 +99,80 @@ const start = function (onStart) {
       /* Here, you can handle the service requests. */
 
       // Write some code...
-      // Check if the service matches a worker endpoint
-      if (service.startsWith('mr-') && service.includes('-worker-')) {
-        console.log("running worker endpoint")
-        // Route the request directly to the worker endpoint
-        const workerEndpoint = global.distribution.local[service];
-        console.log("these are the available services: ", global.distribution.local)
-        if (workerEndpoint && workerEndpoint[method]) {
-          console.log("we have an endpoint boiz")
-          workerEndpoint[method](...args, (e, v) => {
-            res.end(serialization.serialize([e, v]));
-          });
+
+      // Check if the service is 'mr'
+      if (service === 'mr' || service.startsWith('mr-')) {
+        if (method === 'registerEndpoint') {
+          // Register the endpoint
+          const [endpoint, notify] = args;
+          mrEndpoints.set(endpoint, {notify: notify});
+
+          res.end(serialization.serialize([null, 'Success']));
+        } else if (method === 'registerFunctions') {
+          // Register the map and reduce functions
+          const [jobId, map, reduce, shuffle, shuffleData,
+            trueMap, trueReduce, trueCompact] = args;
+          const endpoint = `mr-${jobId}`;
+          const mrEndpoint = mrEndpoints.get(endpoint);
+          if (mrEndpoint) {
+            mrEndpoint.map = map;
+            mrEndpoint.reduce = reduce;
+            mrEndpoint.shuffle = shuffle;
+            mrEndpoint.shuffleData = shuffleData;
+            mrEndpoint.trueMap = trueMap;
+            mrEndpoint.trueReduce = trueReduce;
+            mrEndpoint.trueCompact = trueCompact;
+            res.end(serialization.serialize([null, 'Success']));
+          } else {
+            res.end(serialization.serialize([new
+            Error('MapReduce endpoint not found'), null]));
+          }
         } else {
-          console.log("we dont have an endpoint boiz")
-          res.end(serialization.serialize(new Error('Worker endpoint or method not found')));
+          // Handle the other methods
+          const mrEndpoint = mrEndpoints.get(service);
+          if ((mrEndpoint && mrEndpoint[method]) ||
+            (method === 'deregisterEndpoint')) {
+            if (!mrEndpoint) {
+              res.end(serialization.serialize([null, 'Already deregistered']));
+              return;
+            }
+            const {map, trueMap, reduce, shuffle,
+              shuffleData, trueReduce, notify, trueCompact} = mrEndpoint;
+
+            if (method === 'map') {
+              const [workerKeys, gid, jobId] = args;
+              notify(map, workerKeys, gid, jobId, trueMap, 'map',
+                  trueCompact, (e, v) => {
+                    res.end(serialization.serialize([e, v]));
+                  });
+            } else if (method === 'reduce') {
+              const [gid, jobId] = args;
+              notify(reduce, null, gid, jobId, trueReduce, 'reduce',
+                  null, (e, v) => {
+                    res.end(serialization.serialize([e, v]));
+                  });
+            } else if (method === 'deregisterEndpoint') {
+              const [jobId] = args;
+              const endpoint = `mr-${jobId}`;
+              mrEndpoints.delete(endpoint);
+              res.end(serialization.serialize([null, 'Success']));
+            } else if (method === 'shuffle') {
+              // this method is called shuffleFunction in mr.js
+              // we are passing some null values as placeholders
+              const [jobId, gid] = args;
+              shuffle(crypto, gid, jobId, (e, v) => {
+                res.end(serialization.serialize([e, v]));
+              });
+            } else if (method === 'shuffleData') {
+              const [key, keyValuePair, gid, jobId] = args;
+              shuffleData(key, keyValuePair, jobId, gid, (e, v) => {
+                res.end(serialization.serialize([e, v]));
+              });
+            }
+          } else {
+            res.end(serialization.serialize(
+                [new Error('MapReduce method not found'), null]));
+          }
         }
       } else {
         local.routes.get(service, (error, service) => {
@@ -131,8 +194,8 @@ const start = function (onStart) {
           // Write some code...
 
 
-          console.log(`[SERVER] Args: ${JSON.stringify(args)}
-            ServiceCallback: ${serviceCallback}`);
+          // console.log(`[SERVER] Args: ${JSON.stringify(args)}
+          //   ServiceCallback: ${serviceCallback}`);
 
           service[method](...args, serviceCallback);
         });
